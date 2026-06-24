@@ -132,5 +132,13 @@ namespace SGELProdAutomController {
         /// Libera los recursos utilizados por el controlador
         /// </summary>
         void Close();
+
+
+        // =====================================================================
+        // OPERACIONES DE TRANSACCIÓN ATÓMICA COMPLETA
+        // =====================================================================
+        int RegistrarMantenimientoTransaccional(Mantenimiento^ mantenimiento);
+        int MantenimientoController::AgregarMantenimientoConTransaccion(Mantenimiento^ mantenimiento, SqlConnection^ connection, SqlTransaction^ transaction);
+        bool MantenimientoController::AgregarDetalleMantenimientoConTransaccion(MantenimientoDetalle^ detalle, SqlConnection^ connection, SqlTransaction^ transaction);
     };
 }

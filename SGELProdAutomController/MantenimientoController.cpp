@@ -71,7 +71,7 @@ namespace SGELProdAutomController {
             return inspectionId;
         }
         catch (Exception^ ex) {
-            Console::WriteLine("Error en AgregarInspeccion: " + ex->Message);
+            Console::WriteLine("Error en AgregarMantenimiento: " + ex->Message);
             return 0;
         }
     }
@@ -664,6 +664,141 @@ namespace SGELProdAutomController {
         }
         catch (Exception^ ex) {
             Console::WriteLine("Error al liberar MantenimientoController: " + ex->Message);
+        }
+    }
+
+    // =====================================================================
+    // OPERACIONES DE TRANSACCIÓN ATÓMICA COMPLETA
+    // =====================================================================
+
+    int MantenimientoController::RegistrarMantenimientoTransaccional(Mantenimiento^ mantenimiento) {
+        if (mantenimiento == nullptr) {
+            Console::WriteLine("Error: El mantenimiento es nulo.");
+            return 0;
+        }
+        SqlConnection^ connection = nullptr;
+        SqlTransaction^ transaction = nullptr;
+        String^ sConnectionString = "Server={IP};DataBase={BD};User id={User};Password={PWD}";
+        int mantenimientoId = 0;
+        try {
+            // 1. Crear y abrir conexión
+            connection = gcnew SqlConnection(sConnectionString);
+            connection->Open();
+
+            // 2. INICIAR TRANSACCIÓN DESDE C++/CLI
+            transaction = connection->BeginTransaction();
+            Console::WriteLine("Transacción iniciada desde C++/CLI");
+
+            // 3. Insertar cabecera usando el SP existente, pero dentro de la transacción
+            mantenimientoId = AgregarMantenimientoConTransaccion(mantenimiento,connection,transaction);
+            if (mantenimientoId <= 0) {
+                throw gcnew Exception("No se pudo crear la cabecera de inspección");
+            }
+            // 4. Insertar detalles usando el SP existente, dentro de la misma transacción
+            for each(MantenimientoDetalle ^ detalle in mantenimiento->getListaMantenimientoDetalle()) {
+                detalle->setMantenimientoId(mantenimientoId);
+
+                if (!AgregarDetalleMantenimientoConTransaccion(detalle, connection, transaction)) {
+                    throw gcnew Exception("Error al guardar un detalle de inspección");
+                }
+            }
+
+            // 5. Si todo fue bien: CONFIRMAR TRANSACCIÓN (COMMIT)
+            transaction->Commit();
+            Console::WriteLine("Transacción confirmada (COMMIT). Inspección registrada exitosamente.");
+
+            // 6. Actualizar objeto local
+            mantenimiento->setMantenimientoId(mantenimientoId);
+            this->listaMantenimientos->Add(mantenimiento);
+
+            return mantenimientoId;
+        }
+        catch (Exception^ ex) {
+            // 7. Si algo falla: REVERTIR TRANSACCIÓN (ROLLBACK)
+            if (transaction != nullptr) {
+                try {
+                    transaction->Rollback();
+                    Console::WriteLine("Transacción revertida (ROLLBACK) debido a error: " + ex->Message);
+                }
+                catch (Exception^ rollbackEx) {
+                    Console::WriteLine("Error al hacer Rollback: " + rollbackEx->Message);
+                }
+            }
+
+            Console::WriteLine("Error al registrar inspección: " + ex->Message);
+            return 0;
+        }
+        finally {
+            // 8. Cerrar conexión
+            if (connection != nullptr && connection->State == ConnectionState::Open) {
+                connection->Close();
+                Console::WriteLine("Conexión cerrada.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Inserta cabecera usando el SP existente dentro de una transacción
+    /// SP: usp_CreateMantenimiento (sin modificar)
+    /// </summary>
+    int MantenimientoController::AgregarMantenimientoConTransaccion(Mantenimiento^ mantenimiento,SqlConnection^ connection,SqlTransaction^ transaction) {
+
+        try {
+            // Crear comando asociado a la conexión y transacción
+            SqlCommand^ cmd = gcnew SqlCommand("usp_CreateMantenimiento", connection);
+            cmd->CommandType = CommandType::StoredProcedure;
+            cmd->Transaction = transaction;  // ¡CLAVE! Asociar el comando a la transacción
+
+            // Agregar parámetros
+            cmd->Parameters->AddWithValue("@RobotId", mantenimiento->getRobotId());
+            cmd->Parameters->AddWithValue("@Tecnico", mantenimiento->getTecnico());
+            cmd->Parameters->AddWithValue("@TipoMantenimiento", mantenimiento->getTipoMantenimiento());
+
+            // Parámetro de salida para el ID
+            SqlParameter^ outputParam = gcnew SqlParameter("@MantenimientoId", SqlDbType::Int);
+            outputParam->Direction = ParameterDirection::Output;
+            cmd->Parameters->Add(outputParam);
+
+            // Ejecutar el SP dentro de la transacción
+            cmd->ExecuteNonQuery();
+
+            // Obtener el ID generado
+            int mantenimientoId = safe_cast<int>(outputParam->Value);
+            Console::WriteLine("Cabecera insertada con ID: " + mantenimientoId);
+
+            return mantenimientoId;
+        }
+        catch (Exception^ ex) {
+            Console::WriteLine("Error en AgregarMantenimientoConTransaccion: " + ex->Message);
+            throw; // Re-lanzar para que la transacción haga Rollback
+        }
+    }
+
+    /// <summary>
+    /// Inserta detalle usando el SP existente dentro de una transacción
+    /// SP: usp_AddMantenimientoDetail (sin modificar)
+    /// </summary>
+    bool MantenimientoController::AgregarDetalleMantenimientoConTransaccion(MantenimientoDetalle^ detalle,SqlConnection^ connection,SqlTransaction^ transaction) {
+        try {
+            // Crear comando asociado a la conexión y transacción
+            SqlCommand^ cmd = gcnew SqlCommand("usp_AddMantenimientoDetail", connection);
+            cmd->CommandType = CommandType::StoredProcedure;
+            cmd->Transaction = transaction;  // ¡CLAVE! Asociar el comando a la transacción
+
+            // Agregar parámetros
+            cmd->Parameters->AddWithValue("@MantenimientoId", detalle->getMantenimientoId());
+            cmd->Parameters->AddWithValue("@Actividad", detalle->getActividad());
+            cmd->Parameters->AddWithValue("@DuracionMinutos", detalle->getDuracionMinutos());
+
+            // Ejecutar el SP dentro de la transacción
+            int rowsAffected = cmd->ExecuteNonQuery();
+
+            Console::WriteLine("Detalle insertado: " + detalle->getActividad());
+            return rowsAffected > 0;
+        }
+        catch (Exception^ ex) {
+            Console::WriteLine("Error en AgregarDetalleMantenimientoConTransaccion: " + ex->Message);
+            throw; // Re-lanzar para que la transacción haga Rollback
         }
     }
 }
