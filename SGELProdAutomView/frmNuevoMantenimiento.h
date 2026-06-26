@@ -325,8 +325,7 @@ private: System::Void btnRegistrar_Click(System::Object^ sender, System::EventAr
 
 	// Registramos el mantenimiento usando el controlador
 	MantenimientoController^ mantenimientoController = gcnew  MantenimientoController();
-	//bool success = mantenimientoController->RegistrarMantenimientoCompleto(newMantenimiento);
-	bool success = mantenimientoController->RegistrarMantenimientoTransaccional(newMantenimiento);
+	bool success = mantenimientoController->RegistrarMantenimientoCompleto(newMantenimiento);
 	if (success) {
 		MessageBox::Show("Mantenimiento registrado con éxito.", "Éxito", MessageBoxButtons::OK, MessageBoxIcon::Information);
 		// Limpiar el formulario después de registrar
